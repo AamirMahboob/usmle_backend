@@ -69,7 +69,7 @@ app.use(
 
 // Swagger route
 app.use("/api-docs", swaggerUI.serve, swaggerUI.setup(swaggerSpec));
-
+console.log("hello server")
 // Routes
 app.use("/api/users", userRoutes);
 app.use("/api/auth", authRoutes);
