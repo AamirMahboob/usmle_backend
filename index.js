@@ -41,21 +41,20 @@
 // });
 
 
-// api/index.js
-import express from 'express';
-import serverless from 'serverless-http';
-import dotenv from 'dotenv';
-import connectDB from '../config/db.js';
-import userRoutes from '../routes/userRoutes.js';
-import authRoutes from '../routes/auth.js';
-import subjectRoutes from '../routes/subjectRoutes.js';
-import questionRoutes from '../routes/questionRoutes.js';
-import quizRoutes from '../routes/quizRoutes.js';
-import swaggerUI from 'swagger-ui-express';
-import swaggerSpec from '../docs/swagger.js';
-import cors from 'cors';
 
-dotenv.config();
+
+
+require("dotenv").config();
+const express = require("express");
+const connectDB = require("./config/db");
+const userRoutes = require("./routes/userRoutes");
+const authRoutes = require("./routes/auth");
+const subjectRoutes = require("./routes/subjectRoutes");
+const questionRoutes = require("./routes/questionRoutes");
+const quizRoutes = require("./routes/quizRoutes");
+const swaggerUI = require("swagger-ui-express");
+const swaggerSpec = require("./docs/swagger");
+const cors = require("cors");
 
 const app = express();
 
@@ -68,19 +67,18 @@ app.use(
   })
 );
 
-// Connect DB
-await connectDB();
+// Swagger route
+app.use("/api-docs", swaggerUI.serve, swaggerUI.setup(swaggerSpec));
 
 // Routes
-app.use('/api/users', userRoutes);
-app.use('/api/auth', authRoutes);
-app.use('/api/subjects', subjectRoutes);
-app.use('/api/questions', questionRoutes);
-app.use('/api/quiz', quizRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/subjects", subjectRoutes);
+app.use("/api/questions", questionRoutes);
+app.use("/api/quiz", quizRoutes);
 
-// Swagger docs
-app.use('/api-docs', swaggerUI.serve, swaggerUI.setup(swaggerSpec));
+// Connect DB
+connectDB();
 
-// Export handler for Vercel
-export default serverless(app);
-
+// Export the Express app for Vercel
+module.exports = app;
