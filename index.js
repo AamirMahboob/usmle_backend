@@ -6,8 +6,9 @@ const authRoutes = require("./routes/auth");
 const subjectRoutes = require("./routes/subjectRoutes");
 const questionRoutes = require("./routes/questionRoutes");
 const quizRoutes = require("./routes/quizRoutes");
-const swaggerUI = require("swagger-ui-express");
-const swaggerSpec = require("./docs/swagger");
+const systemRoutes = require("./routes/systemRoutes");
+const countQuestionsRoutes = require("./routes/countQuestionsRoutes");
+
 const cors = require("cors");
 
 const app = express();
@@ -22,20 +23,18 @@ app.use(
   })
 );
 
-// Swagger route
-app.use("/api-docs", swaggerUI.serve, swaggerUI.setup(swaggerSpec));
-
 // Routes
 app.use("/api/users", userRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/subjects", subjectRoutes);
 app.use("/api/questions", questionRoutes);
 app.use("/api/quiz", quizRoutes);
+app.use("/api/system", systemRoutes);
+app.use("/api/countQuestions", countQuestionsRoutes);
 
 // Connect DB and start server
 connectDB().then(() => {
   app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
-    // console.log(`📄 Swagger Docs: http://localhost:${PORT}/api-docs`);
   });
 });

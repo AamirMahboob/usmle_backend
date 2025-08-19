@@ -76,23 +76,27 @@ router.post("/", auth, async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const quiz = await Quiz.findById(req.params.id)
-      .populate("subjects", "subject")
-      .populate({
-        path: "questions.question",
-        select: "question subject answers questionType",
-        populate: {
+    const quiz = await Quiz.findById(req.params.id).populate({
+      path: "questions.question",
+      select: "question subject answers questionType system",
+      populate: [
+        {
           path: "subject",
           model: "Subject",
           select: "subject",
         },
-      });
+        {
+          path: "system",
+          model: "System",
+          select: "system_name",
+        },
+      ],
+    });
 
     if (!quiz) {
       return res.status(404).json({ success: false, error: "Quiz not found" });
     }
 
-    // ✅ Safely format questions (skip nulls)
     const formattedQuestions = quiz.questions
       .filter((q) => q.question !== null)
       .map((q) => {
@@ -100,39 +104,47 @@ router.get("/:id", async (req, res) => {
 
         const formatted = {
           _id: question._id,
-          question: question.question,
-          subject: question.subject,
+          questionText: question.question,
+          subject: question.subject
+            ? {
+                _id: question.subject._id,
+                subject: question.subject.subject,
+              }
+            : null,
+          system: question.system
+            ? {
+                _id: question.system._id,
+                name: question.system.system_name || null, // ✅ Ensure name is there or null
+              }
+            : null,
           questionType: question.questionType,
           selectedAnswer: q.selectedAnswer,
           isCorrect: q.isCorrect,
+          answers: Array.isArray(question.answers)
+            ? question.answers.map((ans) => ({
+                _id: ans._id,
+                text: ans.text,
+              }))
+            : [],
         };
-
-        if (
-          question.questionType === "MCQ" &&
-          Array.isArray(question.answers)
-        ) {
-          // ✅ Only return _id and text of each answer
-          formatted.answers = question.answers.map((ans) => ({
-            _id: ans._id,
-            text: ans.text,
-          }));
-        }
 
         return formatted;
       });
 
     res.json({
+      message: "Quiz fetched successfully.",
       success: true,
-      _id: quiz._id,
-      user: quiz.user,
-      subjects: quiz.subjects,
-      durationMinutes: quiz.durationMinutes,
-      numberOfQuestions: quiz.numberOfQuestions,
-      startedAt: quiz.startedAt,
-      endedAt: quiz.endedAt,
-      isSubmitted: quiz.isSubmitted,
-      score: quiz.score,
-      questions: formattedQuestions,
+      quiz: {
+        quizId: quiz._id,
+        user: quiz.user,
+        durationMinutes: quiz.durationMinutes,
+        numberOfQuestions: quiz.numberOfQuestions,
+        startedAt: quiz.startedAt,
+        endedAt: quiz.endedAt,
+        isSubmitted: quiz.isSubmitted,
+        score: quiz.score,
+        questions: formattedQuestions,
+      },
     });
   } catch (error) {
     console.error("Error fetching quiz:", error);
@@ -221,6 +233,212 @@ router.get("/", auth, async (req, res) => {
     res
       .status(500)
       .json({ success: false, message: "Failed to retrieve quizzes" });
+  }
+});
+router.post("/create", auth, async (req, res) => {
+  try {
+    const {
+      systems = [],
+      questionsPerSystem = 2,
+      durationMinutes = 10,
+    } = req.body;
+    const userId = req.user.id;
+
+    if (!Array.isArray(systems) || systems.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "Please provide at least one system ID." });
+    }
+
+    const selectedQuestions = [];
+    const selectedSubjects = new Set();
+    const questionDetails = [];
+
+    for (const systemId of systems) {
+      const systemObjectId = new mongoose.Types.ObjectId(systemId);
+
+      const questions = await Question.aggregate([
+        { $match: { system: systemObjectId } },
+        { $sample: { size: questionsPerSystem } },
+      ]);
+
+      if (questions.length > 0) {
+        questions.forEach((q) => {
+          selectedQuestions.push({
+            question: q._id,
+            selectedAnswer: null,
+            isCorrect: null,
+          });
+          selectedSubjects.add(q.subject.toString());
+
+          // ✅ Remove isCorrect from answers before sending to frontend
+          const filteredAnswers = q.answers.map((ans) => ({
+            _id: ans._id,
+            text: ans.text,
+          }));
+
+          questionDetails.push({
+            _id: q._id,
+            questionText: q.questionText,
+            answers: filteredAnswers,
+            system: q.system,
+            subject: q.subject,
+          });
+        });
+      }
+    }
+
+    if (selectedQuestions.length === 0) {
+      return res
+        .status(404)
+        .json({ error: "No questions found for the selected systems." });
+    }
+
+    const quiz = await Quiz.create({
+      user: userId,
+      subjects: Array.from(selectedSubjects),
+      questions: selectedQuestions,
+      numberOfQuestions: selectedQuestions.length,
+      durationMinutes,
+      startedAt: new Date(),
+    });
+
+    res.status(201).json({
+      message: "Quiz created successfully.",
+      success: true,
+      quiz: {
+        quizId: quiz._id,
+        numberOfQuestions: quiz.numberOfQuestions,
+        durationMinutes: quiz.durationMinutes,
+        questions: questionDetails, // ✅ Safe for frontend
+      },
+    });
+  } catch (error) {
+    console.error("Quiz creation error:", error);
+    res.status(500).json({ error: "Server error." });
+  }
+});
+
+router.post("/:quizId/answer", async (req, res) => {
+  try {
+    const { questionId, selectedAnswerId } = req.body;
+    const quizId = req.params.quizId;
+
+    const quiz = await Quiz.findById(quizId);
+    if (!quiz) {
+      return res.status(404).json({ success: false, error: "Quiz not found" });
+    }
+
+    const questionEntry = quiz.questions.find(
+      (q) => q.question.toString() === questionId
+    );
+    if (!questionEntry) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Question not part of this quiz" });
+    }
+
+    const question = await Question.findById(questionId);
+    if (!question) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Question not found" });
+    }
+
+    const correctAnswer = question.answers.find((ans) => ans.isCorrect);
+    const isCorrect =
+      correctAnswer && correctAnswer._id.toString() === selectedAnswerId;
+
+    // ✅ Update all needed fields:
+    questionEntry.selectedAnswer = selectedAnswerId;
+    questionEntry.isCorrect = isCorrect;
+    questionEntry.isSubmitted = true; // ✅ Mark as submitted
+    await quiz.save();
+
+    const answers = question.answers.map((ans) => ({
+      _id: ans._id,
+      text: ans.text,
+      isCorrect: ans.isCorrect,
+    }));
+
+    res.json({
+      success: true,
+      message: "Answer submitted.",
+      result: isCorrect ? "Correct" : "Incorrect",
+      isSubmitted: true,
+
+      correctReasonDetails: question.correctReasonDetails || null,
+      correctAnswerId: correctAnswer ? correctAnswer._id : null,
+      question: {
+        questionId: question._id,
+        questionText: question.questionText,
+        answers: answers,
+      },
+    });
+  } catch (error) {
+    console.error("Error submitting answer:", error);
+    res.status(500).json({ success: false, error: "Failed to submit answer" });
+  }
+});
+
+router.post("/:quizId/finish", async (req, res) => {
+  try {
+    const quiz = await Quiz.findById(req.params.quizId).populate({
+      path: "questions.question",
+      select: "question answers correctReasonDetails",
+    });
+
+    if (!quiz) {
+      return res.status(404).json({ success: false, error: "Quiz not found" });
+    }
+
+    if (quiz.isSubmitted) {
+      return res.status(400).json({
+        success: false,
+        error: "Quiz already submitted",
+      });
+    }
+
+    const totalQuestions = quiz.questions.length;
+    const correctCount = quiz.questions.filter((q) => q.isCorrect).length;
+    const score = correctCount;
+
+    quiz.isSubmitted = true;
+    quiz.endedAt = new Date();
+    quiz.score = score;
+    await quiz.save();
+
+    const detailedResults = quiz.questions.map((q) => {
+      const question = q.question;
+      const correctAnswer = question.answers.find((a) => a.isCorrect);
+
+      return {
+        questionId: question._id, // ✅ ID
+        questionText: question.question, // ✅ Text (fixed this line)
+        answers: question.answers.map((ans) => ({
+          _id: ans._id,
+          text: ans.text,
+          isCorrect: ans.isCorrect, // (optional) you can remove this if you don’t want to show
+        })),
+        selectedAnswerId: q.selectedAnswer,
+        isCorrect: q.isCorrect,
+        correctAnswerId: correctAnswer ? correctAnswer._id : null,
+        correctReasonDetails: question.correctReasonDetails || null,
+      };
+    });
+
+    res.json({
+      success: true,
+      message: "Quiz finished.",
+      totalQuestions,
+      correctAnswers: correctCount,
+      wrongAnswers: totalQuestions - correctCount,
+      score,
+      detailedResults,
+    });
+  } catch (error) {
+    console.error("Error finishing quiz:", error);
+    res.status(500).json({ success: false, error: "Failed to finish quiz" });
   }
 });
 

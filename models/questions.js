@@ -7,6 +7,11 @@ const questionSchema = new mongoose.Schema(
       ref: "Subject",
       required: true,
     },
+    system: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "System",
+      required: true,
+    },
     question: {
       type: String,
       required: true,
@@ -22,6 +27,10 @@ const questionSchema = new mongoose.Schema(
         isCorrect: { type: Boolean, default: false },
       },
     ],
+    correctReasonDetails: {
+      type: String,
+      required: true,
+    },
   },
   { timestamps: true }
 );

@@ -14,6 +14,7 @@ const quizSchema = new mongoose.Schema(
         required: true,
       },
     ],
+
     questions: [
       {
         question: {
@@ -23,6 +24,7 @@ const quizSchema = new mongoose.Schema(
         },
         selectedAnswer: String,
         isCorrect: Boolean,
+        isSubmitted: { type: Boolean, default: false }, // ✅ New Field
       },
     ],
     numberOfQuestions: {

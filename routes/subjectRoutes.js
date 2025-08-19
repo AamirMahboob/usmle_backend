@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const Subject = require("../models/subject");
+const Question = require("../models/questions");
 const { auth, authorize } = require("../middleware/auth");
 
 router.post("/", auth, authorize("admin"), async (req, res) => {
@@ -37,7 +38,20 @@ router.post("/", auth, authorize("admin"), async (req, res) => {
 router.get("/", auth, async (req, res) => {
   try {
     const subjects = await Subject.find();
-    res.status(200).json({ success: true, data: subjects });
+
+    const subjectsWithCount = await Promise.all(
+      subjects.map(async (subject) => {
+        const questionCount = await Question.countDocuments({
+          subject: subject._id,
+        });
+        return {
+          ...subject.toObject(),
+          questionCount,
+        };
+      })
+    );
+
+    res.status(200).json({ success: true, data: subjectsWithCount });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
