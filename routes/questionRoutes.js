@@ -1,222 +1,141 @@
 const express = require("express");
 const router = express.Router();
 const Question = require("../models/questions");
-const Subject = require("../models/subject");
 const { auth, authorize } = require("../middleware/auth");
+const upload = require("../middleware/upload");
+const fs = require("fs");
+const path = require("path");
 
-// ✅ Create a question (Admin only)
-// router.post("/", auth, authorize("admin"), async (req, res) => {
-//   try {
-//     const { subject, question, questionType, answers } = req.body;
+// CREATE QUESTION WITH IMAGES
 
-//     if (!subject || !question || !questionType || !answers) {
-//       return res
-//         .status(400)
-//         .json({ success: false, message: "All fields are required." });
-//     }
+router.post(
+  "/",
+  auth,
+  authorize("admin"),
+  upload.fields([
+    { name: "questionImages", maxCount: 5 },
+    { name: "answerImages", maxCount: 10 },
+    { name: "correctReasonImage", maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      const {
+        questionId,
+        subject,
+        system,
+        subsystem, // frontend sends subsystem
+        question,
+        questionType,
+        answers,
+        correctReasonDetails,
+      } = req.body;
 
-//     // Validate subject exists
-//     const existingSubject = await Subject.findById(subject);
-//     if (!existingSubject) {
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "Subject not found." });
-//     }
+      if (
+        !questionId ||
+        !subject ||
+        !system ||
+        !question ||
+        !questionType ||
+        !answers
+      ) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Missing required fields" });
+      }
 
-//     const newQuestion = new Question({
-//       subject,
-//       question,
-//       questionType,
-//       answers,
-//     });
+      // ✅ Check if questionId already exists
+      const existing = await Question.findOne({ questionId });
+      if (existing) {
+        return res.status(400).json({
+          success: false,
+          message: `Question ID "${questionId}" already exists`,
+        });
+      }
 
-//     await newQuestion.save();
+      // ✅ Parse answers
+      let parsedAnswers;
+      try {
+        parsedAnswers =
+          typeof answers === "string" ? JSON.parse(answers) : answers;
+        if (!Array.isArray(parsedAnswers)) {
+          return res
+            .status(400)
+            .json({ success: false, message: "Answers must be an array" });
+        }
+      } catch (err) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid answers format, must be JSON array",
+        });
+      }
 
-//     res.status(201).json({ success: true, data: newQuestion });
-//   } catch (err) {
-//     console.error("Error creating question:", err);
-//     res.status(500).json({ success: false, message: err.message });
-//   }
-// });
+      // ✅ Attach images to answers
+      if (req.files["answerImages"]) {
+        req.files["answerImages"].forEach((file, index) => {
+          if (parsedAnswers[index]) {
+            parsedAnswers[index].image = `/uploads/${file.filename}`;
+          }
+        });
+      }
 
-// // ✅ Get all questions (Any authenticated user)
-// router.get("/", auth, async (req, res) => {
-//   try {
-//     const rawQuestions = await Question.find().populate("subject");
-//     console.log(rawQuestions);
-
-//     res.status(200).json({ success: true, data: rawQuestions });
-//   } catch (err) {
-//     console.error("Error fetching questions:", err);
-//     res.status(500).json({ success: false, message: "Server error" });
-//   }
-// });
-
-// // ✅ Get single question by ID (Any authenticated user)
-// router.get("/:id", auth, async (req, res) => {
-//   try {
-//     const question = await Question.findById(req.params.id).populate("subject");
-
-//     if (!question) {
-//       return res.status(404).json({ success: false, message: "Not found" });
-//     }
-
-//     const formattedQuestion = {
-//       question: question.question,
-//       questionType: question.questionType,
-//       subject: question.subject?.subject || "Unknown", // Optional
-//       answers: question.answers.map((a) => ({ text: a.text })),
-//     };
-
-//     res.status(200).json({ success: true, data: formattedQuestion });
-//   } catch (err) {
-//     console.error("Error fetching question by ID:", err);
-//     res.status(500).json({ success: false, message: "Server error" });
-//   }
-// });
-
-// // ✅ Update a question (Admin only)
-// router.put("/:id", auth, authorize("admin"), async (req, res) => {
-//   try {
-//     const updatedQuestion = await Question.findByIdAndUpdate(
-//       req.params.id,
-//       req.body,
-//       { new: true, runValidators: true }
-//     ).populate("subject");
-
-//     if (!updatedQuestion) {
-//       return res.status(404).json({ success: false, message: "Not found" });
-//     }
-
-//     const formattedQuestion = {
-//       question: updatedQuestion.question,
-//       questionType: updatedQuestion.questionType,
-//       subject: updatedQuestion.subject?.subject || "Unknown",
-//       answers: updatedQuestion.answers.map((a) => ({ text: a.text })),
-//     };
-
-//     res.status(200).json({ success: true, data: formattedQuestion });
-//   } catch (err) {
-//     console.error("Error updating question:", err);
-//     res.status(500).json({ success: false, message: "Server error" });
-//   }
-// });
-
-// // ✅ Delete a question (Admin only)
-// router.delete("/:id", auth, authorize("admin"), async (req, res) => {
-//   try {
-//     const deleted = await Question.findByIdAndDelete(req.params.id);
-//     if (!deleted)
-//       return res.status(404).json({ success: false, message: "Not found" });
-//     res.status(200).json({ success: true, message: "Deleted successfully" });
-//   } catch (err) {
-//     res.status(500).json({ success: false, message: err.message });
-//   }
-// });
-
-// router.post("/by-subjects", auth, async (req, res) => {
-//   try {
-//     const { subjectIds } = req.body;
-
-//     if (!Array.isArray(subjectIds) || subjectIds.length === 0) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "subjectIds must be a non-empty array",
-//       });
-//     }
-
-//     // Optional: Validate if all subject IDs exist
-//     const validSubjects = await Subject.find({ _id: { $in: subjectIds } });
-//     if (validSubjects.length === 0) {
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "No subjects found" });
-//     }
-
-//     // Get questions and manually format the result
-//     const rawQuestions = await Question.find({
-//       subject: { $in: subjectIds },
-//     }).populate("subject");
-
-//     // Only include question, questionType, and answer texts
-//     const questions = rawQuestions.map((q) => ({
-//       _id: q._id,
-//       question: q.question,
-//       questionType: q.questionType,
-//       // answers: q.answers,
-//     }));
-
-//     res.status(200).json({ success: true, data: questions });
-//   } catch (err) {
-//     console.error("Error fetching questions by subject IDs:", err);
-//     res.status(500).json({ success: false, message: "Server error" });
-//   }
-// });
-
-// new apis
-
-router.post("/", auth, authorize("admin"), async (req, res) => {
-  try {
-    const {
-      subject,
-      system,
-      question,
-      questionType,
-      answers,
-      correctReasonDetails,
-    } = req.body;
-
-    // Validate required fields
-    if (
-      !subject ||
-      !system ||
-      !question ||
-      !questionType ||
-      !answers ||
-      !Array.isArray(answers) ||
-      answers.length === 0 ||
-      !correctReasonDetails
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "All fields are required including at least one answer",
+      // ✅ Create Question
+      const newQuestion = new Question({
+        questionId,
+        subject,
+        system,
+        subSystem: subsystem && subsystem !== "null" ? subsystem : null, // fix here // <-- null instead of undefined
+        hasSubSystem: subsystem && subsystem !== "null" ? true : false,
+        question,
+        questionType,
+        answers: parsedAnswers,
+        correctReasonDetails,
+        correctReasonImage: req.files["correctReasonImage"]
+          ? `/uploads/${req.files["correctReasonImage"][0].filename}`
+          : null,
+        questionImages: req.files["questionImages"]
+          ? req.files["questionImages"].map((f) => `/uploads/${f.filename}`)
+          : [],
       });
+
+      await newQuestion.save();
+      return res.status(201).json({ success: true, data: newQuestion });
+    } catch (err) {
+      console.error("Add Question Error:", err);
+
+      // ✅ Handle duplicate error at DB-level
+      if (err.code === 11000 && err.keyPattern?.questionId) {
+        return res.status(400).json({
+          success: false,
+          message: `Question ID "${req.body.questionId}" already exists.`,
+        });
+      }
+
+      return res.status(500).json({ success: false, message: err.message });
     }
-
-    const newQuestion = new Question({
-      subject,
-      system,
-      question,
-      questionType,
-      answers,
-      correctReasonDetails,
-    });
-
-    await newQuestion.save();
-
-    res.status(201).json({ success: true, data: newQuestion });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
   }
-});
+);
 
+// GET ALL QUESTIONS
 router.get("/", auth, async (req, res) => {
   try {
     const questions = await Question.find()
       .populate("subject")
-      .populate("system");
+      .populate("system")
+      .populate("subSystem");
 
     res.status(200).json({ success: true, data: questions });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
+// GET SINGLE QUESTION
 router.get("/:id", auth, async (req, res) => {
   try {
     const question = await Question.findById(req.params.id)
       .populate("subject")
-      .populate("system");
+      .populate("system")
+      .populate("subSystem");
 
     if (!question) {
       return res
@@ -225,62 +144,228 @@ router.get("/:id", auth, async (req, res) => {
     }
 
     res.status(200).json({ success: true, data: question });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-router.put("/:id", auth, authorize("admin"), async (req, res) => {
-  try {
-    const {
-      subject,
-      system,
-      question,
-      questionType,
-      answers,
-      correctReasonDetails,
-    } = req.body;
+// UPDATE QUESTION
 
-    const updated = await Question.findByIdAndUpdate(
-      req.params.id,
-      {
+router.put(
+  "/:id",
+  auth,
+  authorize("admin"),
+  upload.fields([
+    { name: "questionImages", maxCount: 5 },
+    { name: "answerImages", maxCount: 10 },
+    { name: "correctReasonImage", maxCount: 4 },
+  ]),
+  async (req, res) => {
+    try {
+      const {
+        questionId,
         subject,
         system,
+        subsystem,
         question,
         questionType,
         answers,
         correctReasonDetails,
-      },
-      { new: true, runValidators: true }
-    );
+        existingQuestionImages, // Added this field
+        existingAnswerImages, // Added this field
+        keepCorrectReasonImage, // Added this field
+      } = req.body;
 
-    if (!updated) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Question not found" });
+      // ✅ Fetch existing question
+      const existingQuestion = await Question.findById(req.params.id);
+      if (!existingQuestion) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Question not found" });
+      }
+
+      // ✅ Parse answers
+      let parsedAnswers;
+      try {
+        parsedAnswers =
+          typeof answers === "string" ? JSON.parse(answers) : answers;
+        if (!Array.isArray(parsedAnswers)) {
+          return res
+            .status(400)
+            .json({ success: false, message: "Answers must be an array" });
+        }
+      } catch (err) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid answers format, must be JSON array",
+        });
+      }
+
+      // ✅ Handle Answer Images (remove missing, add new)
+      let existingAnswerImagesArray = [];
+      if (existingAnswerImages) {
+        try {
+          existingAnswerImagesArray =
+            typeof existingAnswerImages === "string"
+              ? JSON.parse(existingAnswerImages)
+              : existingAnswerImages;
+        } catch (err) {
+          console.error("Error parsing existingAnswerImages:", err);
+        }
+      }
+
+      // Remove answer images that are no longer present
+      existingQuestion.answers.forEach((oldAns, idx) => {
+        if (oldAns.image) {
+          const imagePath = path.basename(oldAns.image);
+          const isImageStillExists = existingAnswerImagesArray.some(
+            (img) => path.basename(img) === imagePath
+          );
+
+          if (!isImageStillExists) {
+            // Image was removed → delete file
+            const oldPath = path.join(__dirname, "../uploads", imagePath);
+            if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+          }
+        }
+      });
+
+      // Attach new uploaded answer images
+      if (req.files["answerImages"]) {
+        req.files["answerImages"].forEach((file, index) => {
+          if (parsedAnswers[index]) {
+            parsedAnswers[index].image = `/uploads/${file.filename}`;
+          }
+        });
+      }
+
+      // ✅ Handle Question Images
+      let questionImages = [];
+      if (existingQuestionImages) {
+        try {
+          questionImages =
+            typeof existingQuestionImages === "string"
+              ? JSON.parse(existingQuestionImages)
+              : existingQuestionImages;
+        } catch (err) {
+          console.error("Error parsing existingQuestionImages:", err);
+        }
+      }
+
+      // Remove question images that are no longer in the kept list
+      existingQuestion.questionImages.forEach((img) => {
+        if (!questionImages.includes(img)) {
+          const oldPath = path.join(
+            __dirname,
+            "../uploads",
+            path.basename(img)
+          );
+          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        }
+      });
+
+      // Add new uploaded question images
+      if (req.files["questionImages"]) {
+        const newImgs = req.files["questionImages"].map(
+          (f) => `/uploads/${f.filename}`
+        );
+        questionImages = [...questionImages, ...newImgs];
+      }
+
+      // ✅ Handle Correct Reason Image
+      let correctReasonImage = existingQuestion.correctReasonImage;
+
+      if (keepCorrectReasonImage === "false" && correctReasonImage) {
+        // Frontend tells to remove it
+        const oldPath = path.join(
+          __dirname,
+          "../uploads",
+          path.basename(correctReasonImage)
+        );
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        correctReasonImage = null;
+      }
+
+      if (req.files["correctReasonImage"]) {
+        // New one uploaded → replace old
+        if (correctReasonImage) {
+          const oldPath = path.join(
+            __dirname,
+            "../uploads",
+            path.basename(correctReasonImage)
+          );
+          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        }
+        correctReasonImage = `/uploads/${req.files["correctReasonImage"][0].filename}`;
+      }
+
+      // ✅ Update fields
+      existingQuestion.questionId = questionId || existingQuestion.questionId;
+      existingQuestion.subject = subject || existingQuestion.subject;
+      existingQuestion.system = system || existingQuestion.system;
+      existingQuestion.subSystem =
+        subsystem && subsystem !== "null" ? subsystem : null;
+      existingQuestion.question = question || existingQuestion.question;
+      existingQuestion.questionType =
+        questionType || existingQuestion.questionType;
+      existingQuestion.answers = parsedAnswers;
+      existingQuestion.correctReasonDetails =
+        correctReasonDetails || existingQuestion.correctReasonDetails;
+      existingQuestion.correctReasonImage = correctReasonImage;
+      existingQuestion.questionImages = questionImages;
+
+      await existingQuestion.save();
+
+      res.status(200).json({ success: true, data: existingQuestion });
+    } catch (err) {
+      console.error("Update Question Error:", err);
+      res.status(500).json({ success: false, message: err.message });
     }
-
-    res.status(200).json({ success: true, data: updated });
-  } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
   }
-});
+);
+
+// DELETE QUESTION
 
 router.delete("/:id", auth, authorize("admin"), async (req, res) => {
   try {
-    const deleted = await Question.findByIdAndDelete(req.params.id);
+    const question = await Question.findById(req.params.id);
 
-    if (!deleted) {
+    if (!question) {
       return res
         .status(404)
         .json({ success: false, message: "Question not found" });
     }
 
-    res
-      .status(200)
-      .json({ success: true, message: "Question deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    // Collect all file paths
+    const allFiles = [
+      ...(question.questionImages || []),
+      ...(question.answerImages || []),
+      question.correctReasonImage || null,
+    ].filter(Boolean);
+
+    // Delete each file
+    allFiles.forEach((filePath) => {
+      // remove leading "/uploads/"
+      const cleanedPath = filePath.replace(/^\/?uploads[\\/]/, "");
+      const fullPath = path.join(__dirname, "..", "uploads", cleanedPath);
+
+      fs.unlink(fullPath, (err) => {
+        if (err) {
+          console.error(`Failed to delete file: ${fullPath}`, err.message);
+        }
+      });
+    });
+
+    // Delete question from DB
+    await Question.findByIdAndDelete(req.params.id);
+
+    res.status(200).json({
+      success: true,
+      message: "Question and images deleted successfully",
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 

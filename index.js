@@ -8,8 +8,10 @@ const questionRoutes = require("./routes/questionRoutes");
 const quizRoutes = require("./routes/quizRoutes");
 const systemRoutes = require("./routes/systemRoutes");
 const countQuestionsRoutes = require("./routes/countQuestionsRoutes");
+const subSystemRoutes = require("./routes/subSystemRoutes");
 
 const cors = require("cors");
+const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -24,6 +26,9 @@ app.use(
 );
 
 // Routes
+// after middlewares
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
 app.use("/api/users", userRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/subjects", subjectRoutes);
@@ -31,6 +36,7 @@ app.use("/api/questions", questionRoutes);
 app.use("/api/quiz", quizRoutes);
 app.use("/api/system", systemRoutes);
 app.use("/api/countQuestions", countQuestionsRoutes);
+app.use("/api/subSystem", subSystemRoutes);
 
 // Connect DB and start server
 connectDB().then(() => {
