@@ -27,7 +27,7 @@ app.use(
 
 // Routes
 // after middlewares
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 app.use("/api/users", userRoutes);
 app.use("/api/auth", authRoutes);
