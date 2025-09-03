@@ -521,106 +521,81 @@ router.get("/:id", auth, async (req, res) => {
 // ===============================
 // UPDATE QUESTION
 // ===============================
-router.put(
-  "/:id",
-  auth,
-  authorize("admin"),
-  upload.fields([
-    { name: "questionImages", maxCount: 5 },
-    { name: "answerImages", maxCount: 10 },
-    { name: "correctReasonImage", maxCount: 1 },
-  ]),
-  async (req, res) => {
-    try {
-      const existingQuestion = await Question.findById(req.params.id);
-      if (!existingQuestion) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Question not found" });
-      }
+// UPDATE QUESTION
+router.put("/:id", upload.array("questionImages", 5), async (req, res) => {
+  try {
+    const { id } = req.params;
+    let { question, options, correctAnswer, explanation, existingQuestionImages } = req.body;
 
-      const {
-        questionId,
-        subject,
-        system,
-        subsystem,
-        question,
-        questionType,
-        answers,
-        correctReasonDetails,
-        existingQuestionImages,
-        keepCorrectReasonImage,
-      } = req.body;
-
-      // Parse answers
-      let parsedAnswers =
-        typeof answers === "string" ? JSON.parse(answers) : answers;
-
-      // Attach new uploaded answer images
-      if (req.files["answerImages"]) {
-        req.files["answerImages"].forEach((file, index) => {
-          if (parsedAnswers[index]) {
-            parsedAnswers[index].image = {
-              url: file.path,
-              public_id: file.filename,
-            };
-          }
-        });
-      }
-
-      // Handle Question Images
-      let questionImages = [];
-      if (existingQuestionImages) {
-        questionImages =
-          typeof existingQuestionImages === "string"
-            ? JSON.parse(existingQuestionImages)
-            : existingQuestionImages;
-      }
-      if (req.files["questionImages"]) {
-        questionImages = [
-          ...questionImages,
-          ...req.files["questionImages"].map((f) => ({
-            url: f.path,
-            public_id: f.filename,
-          })),
-        ];
-      }
-
-      // Handle Correct Reason Image
-      let correctReasonImage = existingQuestion.correctReasonImage;
-      if (keepCorrectReasonImage === "false") {
-        correctReasonImage = null;
-      }
-      if (req.files["correctReasonImage"]) {
-        correctReasonImage = {
-          url: req.files["correctReasonImage"][0].path,
-          public_id: req.files["correctReasonImage"][0].filename,
-        };
-      }
-
-      // Update fields
-      existingQuestion.questionId = questionId || existingQuestion.questionId;
-      existingQuestion.subject = subject || existingQuestion.subject;
-      existingQuestion.system = system || existingQuestion.system;
-      existingQuestion.subSystem =
-        subsystem && subsystem !== "null" ? subsystem : null;
-      existingQuestion.question = question || existingQuestion.question;
-      existingQuestion.questionType =
-        questionType || existingQuestion.questionType;
-      existingQuestion.answers = parsedAnswers;
-      existingQuestion.correctReasonDetails =
-        correctReasonDetails || existingQuestion.correctReasonDetails;
-      existingQuestion.correctReasonImage = correctReasonImage;
-      existingQuestion.questionImages = questionImages;
-
-      await existingQuestion.save();
-      res.status(200).json({ success: true, data: existingQuestion });
-    } catch (err) {
-      console.error("Update Question Error:", err);
-      res.status(500).json({ success: false, message: err.message });
+    // ✅ Normalize options
+    if (typeof options === "string") {
+      options = JSON.parse(options);
     }
+
+    // ✅ Normalize existing images
+    let questionImages = [];
+    if (existingQuestionImages) {
+      if (typeof existingQuestionImages === "string") {
+        try {
+          const parsed = JSON.parse(existingQuestionImages);
+
+          // case 1: if parsed is a plain string (URL only)
+          if (typeof parsed === "string") {
+            questionImages = [{ url: parsed, public_id: null }];
+          }
+          // case 2: if parsed is already an array of objects
+          else if (Array.isArray(parsed)) {
+            questionImages = parsed.map(img =>
+              typeof img === "string"
+                ? { url: img, public_id: null }
+                : img
+            );
+          }
+          // case 3: if parsed is an object
+          else if (parsed.url) {
+            questionImages = [parsed];
+          }
+        } catch (err) {
+          // If it's not JSON, treat it as a single URL
+          questionImages = [{ url: existingQuestionImages, public_id: null }];
+        }
+      } else if (Array.isArray(existingQuestionImages)) {
+        questionImages = existingQuestionImages.map(img =>
+          typeof img === "string"
+            ? { url: img, public_id: null }
+            : img
+        );
+      }
+    }
+
+    // ✅ Handle new uploads
+    if (req.files && req.files.length > 0) {
+      for (let file of req.files) {
+        const result = await cloudinary.uploader.upload(file.path, {
+          folder: "usmle_questions",
+        });
+        questionImages.push({ url: result.secure_url, public_id: result.public_id });
+      }
+    }
+
+    // ✅ Update question
+    const updatedQuestion = await Question.findByIdAndUpdate(
+      id,
+      { question, options, correctAnswer, explanation, questionImages },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedQuestion) {
+      return res.status(404).json({ success: false, message: "Question not found" });
+    }
+
+    res.json({ success: true, data: updatedQuestion });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
   }
-);
+});
+
 
 
 // ===============================
